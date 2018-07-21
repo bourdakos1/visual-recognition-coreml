@@ -38,6 +38,7 @@ class ImageClassificationViewController: UIViewController {
     @IBOutlet weak var choosePhotoButton: UIButton!
     @IBOutlet weak var closeButton: UIButton!
     @IBOutlet weak var alphaSlider: UISlider!
+    @IBOutlet weak var confidenceLabel: UILabel!
     
     // MARK: - Variable Declarations
     
@@ -142,8 +143,10 @@ class ImageClassificationViewController: UIViewController {
         var editedImage = cropToCenter(image: image)
         editedImage = resizeImage(image: editedImage, targetSize: CGSize(width: 224, height: 224))
         
-        showResultsUI(for: editedImage)
-        SwiftSpinner.show("analyzing")
+        DispatchQueue.main.async {
+            self.showResultsUI(for: editedImage)
+            SwiftSpinner.show("analyzing")
+        }
         
         var originalConf = 0.0
         visualRecognition.classifyWithLocalModel(image: editedImage, classifierIDs: VisualRecognitionConstants.modelIds, threshold: localThreshold, failure: nil) { classifiedImages in
@@ -167,24 +170,26 @@ class ImageClassificationViewController: UIViewController {
         
         imageView.contentMode = .scaleAspectFit
         
-//        let dispatchGroup = DispatchGroup()
+        let dispatchGroup = DispatchGroup()
         
         var confidences = [[Double]](repeating: [Double](repeating: -1, count: 17), count: 17)
         
-//        DispatchQueue.global(qos: .background).async {
-        
+        dispatchGroup.enter()
+    
+        DispatchQueue.global(qos: .background).async {
+            
             for down in 0 ..< 11 {
                 for right in 0 ..< 11 {
                     confidences[down + 3][right + 3] = 0
                     print("\(down) - \(right)")
-//                    dispatchGroup.enter()
+                    dispatchGroup.enter()
                     let maskedImage = self.drawRectangleOnImage(image: editedImage, right: right, down: down)
                     self.visualRecognition.classifyWithLocalModel(image: maskedImage, classifierIDs: VisualRecognitionConstants.modelIds, threshold: localThreshold, failure: nil) { [down, right] classifiedImages in
                         
                         // Make sure that an image was successfully classified.
                         guard let classifiedImage = classifiedImages.images.first,
                             let classifier = classifiedImage.classifiers.first else {
-//                                dispatchGroup.leave()
+                                dispatchGroup.leave()
                                 return
                         }
                         
@@ -192,32 +197,34 @@ class ImageClassificationViewController: UIViewController {
                         
                         guard let usbClassSingle = usbClass.first,
                             let score = usbClassSingle.score else {
-//                                dispatchGroup.leave()
+                                dispatchGroup.leave()
                                 return
                         }
                         
                         print("\(down) - \(right)")
                         confidences[down + 3][right + 3] = score
-//                        dispatchGroup.leave()
+                        dispatchGroup.leave()
                     }
-//                    dispatchGroup.wait()
                 }
             }
-            
-            print(confidences)
-            print(originalConf)
-            
-            self.editedImage = editedImage
-            self.confidences = confidences
-            self.originalConf = originalConf
-            
-            let final = self.renderImage(image: editedImage, confidences: confidences, originalConf: originalConf, alpha: sliderValue)
-            
-            DispatchQueue.main.async {
+            dispatchGroup.leave()
+        
+            dispatchGroup.notify(queue: .main) {
+                print(confidences)
+                print(originalConf)
+                
+                self.editedImage = editedImage
+                self.confidences = confidences
+                self.originalConf = originalConf
+                
+                let final = self.renderImage(image: editedImage, confidences: confidences, originalConf: originalConf, alpha: sliderValue)
+                
                 self.imageView.image = final
+                self.confidenceLabel.text = "Confidence: \(originalConf)"
                 SwiftSpinner.hide()
             }
-//        }
+        }
+        
     }
     
     var editedImage = UIImage()
@@ -250,7 +257,7 @@ class ImageClassificationViewController: UIViewController {
                 
                 let mean = sum / count
                 
-                let newalpha = 1 - max(originalConf - mean, 0) * 3
+                let newalpha = 1 - max(originalConf - mean, 0) * 5
                 let cappedAlpha = min(max(newalpha, 0), 1)
                 print(cappedAlpha)
                 
@@ -359,6 +366,7 @@ class ImageClassificationViewController: UIViewController {
         choosePhotoButton.isHidden = true
         updateModelButton.isHidden = true
         alphaSlider.isHidden = false
+        confidenceLabel.isHidden = false
     }
     
     func resetUI() {
@@ -372,7 +380,7 @@ class ImageClassificationViewController: UIViewController {
             imageView.isHidden = false
             captureButton.isHidden = true
         }
-        
+        confidenceLabel.isHidden = true
         alphaSlider.isHidden = true
         closeButton.isHidden = true
         choosePhotoButton.isHidden = false
