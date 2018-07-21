@@ -64,6 +64,12 @@
                                     <action selector="updateModel:" destination="MPu-h4-IWa" eventType="touchUpInside" id="39k-na-ywz"/>
                                 </connections>
                             </button>
+                            <slider opaque="NO" contentMode="scaleToFill" contentHorizontalAlignment="center" contentVerticalAlignment="center" value="0.84999999999999998" minValue="0.0" maxValue="1" translatesAutoresizingMaskIntoConstraints="NO" id="jV6-kf-Rrz">
+                                <rect key="frame" x="8" y="531" width="359" height="31"/>
+                                <connections>
+                                    <action selector="sliderValueChanged:" destination="MPu-h4-IWa" eventType="valueChanged" id="bwk-Nd-afe"/>
+                                </connections>
+                            </slider>
                         </subviews>
                         <color key="backgroundColor" white="0.0" alpha="1" colorSpace="calibratedWhite"/>
                         <constraints>
@@ -72,6 +78,7 @@
                             <constraint firstItem="C0k-SZ-2ab" firstAttribute="centerY" secondItem="O2c-uk-frK" secondAttribute="centerY" id="Bvj-Sp-VHo"/>
                             <constraint firstAttribute="bottomMargin" secondItem="Iqh-pk-Qts" secondAttribute="bottom" constant="20" id="Dmq-Jh-iFa"/>
                             <constraint firstAttribute="trailing" secondItem="Cut-U1-rk1" secondAttribute="trailing" id="E6A-QZ-cyO"/>
+                            <constraint firstItem="jV6-kf-Rrz" firstAttribute="leading" secondItem="QGZ-b4-zCe" secondAttribute="leading" constant="10" id="Kx3-Np-oid"/>
                             <constraint firstItem="Iqh-pk-Qts" firstAttribute="leading" secondItem="oBa-W5-Ood" secondAttribute="leadingMargin" constant="20" id="OOR-M9-Lkj"/>
                             <constraint firstItem="PQ4-s0-jJR" firstAttribute="top" secondItem="QGZ-b4-zCe" secondAttribute="top" constant="20" id="SBR-ap-OWn"/>
                             <constraint firstItem="gZh-H7-kgW" firstAttribute="centerX" secondItem="oBa-W5-Ood" secondAttribute="centerX" id="SM1-Th-JHm"/>
@@ -80,6 +87,8 @@
                             <constraint firstItem="QGZ-b4-zCe" firstAttribute="trailing" secondItem="PQ4-s0-jJR" secondAttribute="trailing" constant="20" id="Via-RW-unY"/>
                             <constraint firstItem="pUB-PT-eoR" firstAttribute="leading" secondItem="oBa-W5-Ood" secondAttribute="leading" id="X6A-uN-JTq"/>
                             <constraint firstItem="Cut-U1-rk1" firstAttribute="leading" secondItem="oBa-W5-Ood" secondAttribute="leading" id="d0k-tx-Loq"/>
+                            <constraint firstItem="jV6-kf-Rrz" firstAttribute="top" secondItem="Cut-U1-rk1" secondAttribute="bottom" constant="10" id="g5a-9S-qa3"/>
+                            <constraint firstItem="QGZ-b4-zCe" firstAttribute="trailing" secondItem="jV6-kf-Rrz" secondAttribute="trailing" constant="10" id="ifq-Iz-m5b"/>
                             <constraint firstItem="Iqh-pk-Qts" firstAttribute="top" secondItem="oBa-W5-Ood" secondAttribute="topMargin" constant="20" id="k1v-ah-d5D"/>
                             <constraint firstItem="pUB-PT-eoR" firstAttribute="centerY" secondItem="oBa-W5-Ood" secondAttribute="centerY" id="pxE-cT-OTc"/>
                             <constraint firstAttribute="trailing" secondItem="pUB-PT-eoR" secondAttribute="trailing" id="tlg-dE-bfb"/>
@@ -90,6 +99,7 @@
                         <viewLayoutGuide key="safeArea" id="QGZ-b4-zCe"/>
                     </view>
                     <connections>
+                        <outlet property="alphaSlider" destination="jV6-kf-Rrz" id="piG-B4-VIA"/>
                         <outlet property="cameraView" destination="Cut-U1-rk1" id="Drx-Vj-hkf"/>
                         <outlet property="captureButton" destination="gZh-H7-kgW" id="ekE-dA-IKu"/>
                         <outlet property="choosePhotoButton" destination="O2c-uk-frK" id="hdF-Th-fXv"/>

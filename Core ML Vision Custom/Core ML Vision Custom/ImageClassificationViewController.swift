@@ -20,9 +20,9 @@ import VisualRecognitionV3
 
 struct VisualRecognitionConstants {
     // Instantiation with `api_key` works only with Visual Recognition service instances created before May 23, 2018. Visual Recognition instances created after May 22 use the IAM `apikey`.
-    static let apikey = ""     // The IAM apikey
+    static let apikey = "oSPvI_VA3hWIdCutkfggdtxvXgItQJJm-ff1fOGKMd2F"     // The IAM apikey
     static let api_key = ""    // The apikey
-    static let modelIds = ["YOUR_MODEL_ID"]
+    static let modelIds = ["DefaultCustomModel_936213647"]
     static let version = "2018-03-19"
 }
 
@@ -37,6 +37,7 @@ class ImageClassificationViewController: UIViewController {
     @IBOutlet weak var updateModelButton: UIButton!
     @IBOutlet weak var choosePhotoButton: UIButton!
     @IBOutlet weak var closeButton: UIButton!
+    @IBOutlet weak var alphaSlider: UISlider!
     
     // MARK: - Variable Declarations
     
@@ -136,30 +137,174 @@ class ImageClassificationViewController: UIViewController {
     // MARK: - Image Classification
     
     func classifyImage(_ image: UIImage, localThreshold: Double = 0.0) {
-        showResultsUI(for: image)
+        let sliderValue = Double(self.alphaSlider.value)
         
-        let failure = { (error: Error) in
-            DispatchQueue.main.async {
-                self.showAlert("Could not classify image", alertMessage: error.localizedDescription)
-                self.resetUI()
-            }
-        }
+        var editedImage = cropToCenter(image: image)
+        editedImage = resizeImage(image: editedImage, targetSize: CGSize(width: 224, height: 224))
         
-        let imageCentered = cropToCenter(image: image)
+        showResultsUI(for: editedImage)
+        SwiftSpinner.show("analyzing")
         
-        visualRecognition.classifyWithLocalModel(image: imageCentered, classifierIDs: VisualRecognitionConstants.modelIds, threshold: localThreshold, failure: failure) { classifiedImages in
-            
+        var originalConf = 0.0
+        visualRecognition.classifyWithLocalModel(image: editedImage, classifierIDs: VisualRecognitionConstants.modelIds, threshold: localThreshold, failure: nil) { classifiedImages in
+
             // Make sure that an image was successfully classified.
-            guard let classifiedImage = classifiedImages.images.first else {
-                return
+            guard let classifiedImage = classifiedImages.images.first,
+                let classifier = classifiedImage.classifiers.first else {
+                    return
             }
 
-            // Update UI on main thread
+            let usbClass = classifier.classes.filter({ return $0.className.uppercased() == "USB" })
+
+            guard let usbClassSingle = usbClass.first,
+                let score = usbClassSingle.score else {
+                    return
+            }
+
+            originalConf = score
+        }
+        
+        
+        imageView.contentMode = .scaleAspectFit
+        
+//        let dispatchGroup = DispatchGroup()
+        
+        var confidences = [[Double]](repeating: [Double](repeating: -1, count: 17), count: 17)
+        
+//        DispatchQueue.global(qos: .background).async {
+        
+            for down in 0 ..< 11 {
+                for right in 0 ..< 11 {
+                    confidences[down + 3][right + 3] = 0
+                    print("\(down) - \(right)")
+//                    dispatchGroup.enter()
+                    let maskedImage = self.drawRectangleOnImage(image: editedImage, right: right, down: down)
+                    self.visualRecognition.classifyWithLocalModel(image: maskedImage, classifierIDs: VisualRecognitionConstants.modelIds, threshold: localThreshold, failure: nil) { [down, right] classifiedImages in
+                        
+                        // Make sure that an image was successfully classified.
+                        guard let classifiedImage = classifiedImages.images.first,
+                            let classifier = classifiedImage.classifiers.first else {
+//                                dispatchGroup.leave()
+                                return
+                        }
+                        
+                        let usbClass = classifier.classes.filter({ return $0.className.uppercased() == "USB" })
+                        
+                        guard let usbClassSingle = usbClass.first,
+                            let score = usbClassSingle.score else {
+//                                dispatchGroup.leave()
+                                return
+                        }
+                        
+                        print("\(down) - \(right)")
+                        confidences[down + 3][right + 3] = score
+//                        dispatchGroup.leave()
+                    }
+//                    dispatchGroup.wait()
+                }
+            }
+            
+            print(confidences)
+            print(originalConf)
+            
+            self.editedImage = editedImage
+            self.confidences = confidences
+            self.originalConf = originalConf
+            
+            let final = self.renderImage(image: editedImage, confidences: confidences, originalConf: originalConf, alpha: sliderValue)
+            
             DispatchQueue.main.async {
-                // Push the classification results of all the provided models to the ResultsTableView.
-                self.push(results: classifiedImage.classifiers)
+                self.imageView.image = final
+                SwiftSpinner.hide()
+            }
+//        }
+    }
+    
+    var editedImage = UIImage()
+    var confidences = [[Double]]()
+    var originalConf = 0.0
+    
+    func renderImage(image: UIImage, confidences: [[Double]], originalConf: Double, alpha: Double) -> UIImage {
+        let size = image.size
+        UIGraphicsBeginImageContextWithOptions(size, true, UIScreen.main.scale)
+        
+        image.draw(at: .zero, blendMode: .normal, alpha: 1)
+                
+        for down in 0 ..< 14 {
+            for right in 0 ..< 14 {
+                let rectangle = CGRect(x: right * 16, y: down * 16, width: 16, height: 16)
+                
+                let kernel = confidences[down + 0...down + 3].map({ $0[right + 0...right + 3] })
+            
+                var sum = 0.0
+                var count = 16.0
+                for row in kernel {
+                    for score in row {
+                        if score == -1 {
+                            count -= 1
+                        } else {
+                            sum += score
+                        }
+                    }
+                }
+                
+                let mean = sum / count
+                
+                let newalpha = 1 - max(originalConf - mean, 0) * 3
+                let cappedAlpha = min(max(newalpha, 0), 1)
+                print(cappedAlpha)
+                
+                UIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(cappedAlpha * alpha)).setFill()
+                UIRectFillUsingBlendMode(rectangle, .normal)
+                
             }
         }
+        
+        let newImage = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        return newImage
+    }
+    
+    func drawRectangleOnImage(image: UIImage, right: Int, down: Int) -> UIImage {
+        let size = image.size
+        UIGraphicsBeginImageContextWithOptions(size, true, UIScreen.main.scale)
+        
+        image.draw(at: .zero)
+        
+        let rectangle = CGRect(x: right * 16, y: down * 16, width: 64, height: 64)
+        
+        UIColor(red: 1, green: 0, blue: 1, alpha: 1).setFill()
+        UIRectFill(rectangle)
+        
+        let newImage = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        return newImage
+    }
+    
+    func resizeImage(image: UIImage, targetSize: CGSize) -> UIImage {
+        let size = image.size
+        
+        let widthRatio  = targetSize.width  / size.width
+        let heightRatio = targetSize.height / size.height
+        
+        // Figure out what our orientation is, and use that to form the rectangle
+        var newSize: CGSize
+        if(widthRatio > heightRatio) {
+            newSize = CGSize(width: size.width * heightRatio, height: size.height * heightRatio)
+        } else {
+            newSize = CGSize(width: size.width * widthRatio,  height: size.height * widthRatio)
+        }
+        
+        // This is the rect that we've calculated out and this is what is actually used below
+        let rect = CGRect(x: 0, y: 0, width: newSize.width, height: newSize.height)
+        
+        // Actually do the resizing to the rect using the ImageContext stuff
+        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
+        image.draw(in: rect)
+        let newImage = UIGraphicsGetImageFromCurrentImageContext()
+        UIGraphicsEndImageContext()
+        
+        return newImage!
     }
     
     func cropToCenter(image: UIImage) -> UIImage {
@@ -213,6 +358,7 @@ class ImageClassificationViewController: UIViewController {
         captureButton.isHidden = true
         choosePhotoButton.isHidden = true
         updateModelButton.isHidden = true
+        alphaSlider.isHidden = false
     }
     
     func resetUI() {
@@ -227,6 +373,7 @@ class ImageClassificationViewController: UIViewController {
             captureButton.isHidden = true
         }
         
+        alphaSlider.isHidden = true
         closeButton.isHidden = true
         choosePhotoButton.isHidden = false
         updateModelButton.isHidden = false
@@ -234,6 +381,12 @@ class ImageClassificationViewController: UIViewController {
     }
     
     // MARK: - IBActions
+    
+    @IBAction func sliderValueChanged(_ sender: UISlider) {
+        let currentValue = Double(sender.value)
+        let final = self.renderImage(image: editedImage, confidences: confidences, originalConf: originalConf, alpha: currentValue)
+        imageView.image = final
+    }
     
     @IBAction func capturePhoto() {
         photoOutput.capturePhoto(with: AVCapturePhotoSettings(), delegate: self)
