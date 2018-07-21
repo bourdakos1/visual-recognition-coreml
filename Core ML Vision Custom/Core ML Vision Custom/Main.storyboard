@@ -70,6 +70,12 @@
                                     <action selector="sliderValueChanged:" destination="MPu-h4-IWa" eventType="valueChanged" id="bwk-Nd-afe"/>
                                 </connections>
                             </slider>
+                            <label opaque="NO" userInteractionEnabled="NO" contentMode="left" horizontalHuggingPriority="251" verticalHuggingPriority="251" text="Confidence: 0.31" textAlignment="natural" lineBreakMode="tailTruncation" baselineAdjustment="alignBaselines" adjustsFontSizeToFit="NO" translatesAutoresizingMaskIntoConstraints="NO" id="F56-ir-tv9">
+                                <rect key="frame" x="10" y="115" width="129" height="21"/>
+                                <fontDescription key="fontDescription" type="system" pointSize="17"/>
+                                <color key="textColor" white="1" alpha="1" colorSpace="custom" customColorSpace="genericGamma22GrayColorSpace"/>
+                                <nil key="highlightedColor"/>
+                            </label>
                         </subviews>
                         <color key="backgroundColor" white="0.0" alpha="1" colorSpace="calibratedWhite"/>
                         <constraints>
@@ -78,6 +84,7 @@
                             <constraint firstItem="C0k-SZ-2ab" firstAttribute="centerY" secondItem="O2c-uk-frK" secondAttribute="centerY" id="Bvj-Sp-VHo"/>
                             <constraint firstAttribute="bottomMargin" secondItem="Iqh-pk-Qts" secondAttribute="bottom" constant="20" id="Dmq-Jh-iFa"/>
                             <constraint firstAttribute="trailing" secondItem="Cut-U1-rk1" secondAttribute="trailing" id="E6A-QZ-cyO"/>
+                            <constraint firstItem="Cut-U1-rk1" firstAttribute="top" secondItem="F56-ir-tv9" secondAttribute="bottom" constant="10" id="Ktk-Uu-8Mz"/>
                             <constraint firstItem="jV6-kf-Rrz" firstAttribute="leading" secondItem="QGZ-b4-zCe" secondAttribute="leading" constant="10" id="Kx3-Np-oid"/>
                             <constraint firstItem="Iqh-pk-Qts" firstAttribute="leading" secondItem="oBa-W5-Ood" secondAttribute="leadingMargin" constant="20" id="OOR-M9-Lkj"/>
                             <constraint firstItem="PQ4-s0-jJR" firstAttribute="top" secondItem="QGZ-b4-zCe" secondAttribute="top" constant="20" id="SBR-ap-OWn"/>
@@ -86,6 +93,7 @@
                             <constraint firstItem="QGZ-b4-zCe" firstAttribute="trailing" secondItem="C0k-SZ-2ab" secondAttribute="trailing" constant="20" id="UpE-Qs-cia"/>
                             <constraint firstItem="QGZ-b4-zCe" firstAttribute="trailing" secondItem="PQ4-s0-jJR" secondAttribute="trailing" constant="20" id="Via-RW-unY"/>
                             <constraint firstItem="pUB-PT-eoR" firstAttribute="leading" secondItem="oBa-W5-Ood" secondAttribute="leading" id="X6A-uN-JTq"/>
+                            <constraint firstItem="F56-ir-tv9" firstAttribute="leading" secondItem="QGZ-b4-zCe" secondAttribute="leading" constant="10" id="bWH-gW-XKV"/>
                             <constraint firstItem="Cut-U1-rk1" firstAttribute="leading" secondItem="oBa-W5-Ood" secondAttribute="leading" id="d0k-tx-Loq"/>
                             <constraint firstItem="jV6-kf-Rrz" firstAttribute="top" secondItem="Cut-U1-rk1" secondAttribute="bottom" constant="10" id="g5a-9S-qa3"/>
                             <constraint firstItem="QGZ-b4-zCe" firstAttribute="trailing" secondItem="jV6-kf-Rrz" secondAttribute="trailing" constant="10" id="ifq-Iz-m5b"/>
@@ -104,6 +112,7 @@
                         <outlet property="captureButton" destination="gZh-H7-kgW" id="ekE-dA-IKu"/>
                         <outlet property="choosePhotoButton" destination="O2c-uk-frK" id="hdF-Th-fXv"/>
                         <outlet property="closeButton" destination="PQ4-s0-jJR" id="BIn-42-G6c"/>
+                        <outlet property="confidenceLabel" destination="F56-ir-tv9" id="GAV-vd-zJs"/>
                         <outlet property="imageView" destination="pUB-PT-eoR" id="o73-CL-qHW"/>
                         <outlet property="simulatorTextView" destination="Iqh-pk-Qts" id="Qud-cz-fR9"/>
                         <outlet property="updateModelButton" destination="C0k-SZ-2ab" id="3yu-Q5-r5R"/>
