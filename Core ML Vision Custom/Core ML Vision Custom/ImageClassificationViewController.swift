@@ -20,9 +20,9 @@ import VisualRecognitionV3
 
 struct VisualRecognitionConstants {
     // Instantiation with `api_key` works only with Visual Recognition service instances created before May 23, 2018. Visual Recognition instances created after May 22 use the IAM `apikey`.
-    static let apikey = "oSPvI_VA3hWIdCutkfggdtxvXgItQJJm-ff1fOGKMd2F"     // The IAM apikey
+    static let apikey = ""     // The IAM apikey
     static let api_key = ""    // The apikey
-    static let modelIds = ["DefaultCustomModel_936213647"]
+    static let modelIds = ["YOUR_MODEL_ID"]
     static let version = "2018-03-19"
 }
 
@@ -39,6 +39,7 @@ class ImageClassificationViewController: UIViewController {
     @IBOutlet weak var closeButton: UIButton!
     @IBOutlet weak var alphaSlider: UISlider!
     @IBOutlet weak var confidenceLabel: UILabel!
+    @IBOutlet weak var dropLabel: UILabel!
     
     // MARK: - Variable Declarations
     
@@ -236,6 +237,17 @@ class ImageClassificationViewController: UIViewController {
         UIGraphicsBeginImageContextWithOptions(size, true, UIScreen.main.scale)
         
         image.draw(at: .zero, blendMode: .normal, alpha: 1)
+        
+        var minVal = 1.0
+        for row in confidences  {
+            for score in row {
+                if score != -1 && score < minVal {
+                    minVal = score
+                }
+            }
+        }
+        
+        dropLabel.text = "Drop: \(max(originalConf - minVal, 0))"
                 
         for down in 0 ..< 14 {
             for right in 0 ..< 14 {
@@ -257,7 +269,7 @@ class ImageClassificationViewController: UIViewController {
                 
                 let mean = sum / count
                 
-                let newalpha = 1 - max(originalConf - mean, 0) * 5
+                let newalpha = 1 - max(originalConf - mean, 0) / max(originalConf - minVal, 0)
                 let cappedAlpha = min(max(newalpha, 0), 1)
                 print(cappedAlpha)
                 
@@ -367,6 +379,7 @@ class ImageClassificationViewController: UIViewController {
         updateModelButton.isHidden = true
         alphaSlider.isHidden = false
         confidenceLabel.isHidden = false
+        dropLabel.isHidden = false
     }
     
     func resetUI() {
@@ -380,6 +393,7 @@ class ImageClassificationViewController: UIViewController {
             imageView.isHidden = false
             captureButton.isHidden = true
         }
+        dropLabel.isHidden = true
         confidenceLabel.isHidden = true
         alphaSlider.isHidden = true
         closeButton.isHidden = true
