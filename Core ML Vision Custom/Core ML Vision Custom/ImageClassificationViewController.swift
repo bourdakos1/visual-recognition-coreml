@@ -20,14 +20,18 @@ import VisualRecognitionV3
 
 struct VisualRecognitionConstants {
     // Instantiation with `api_key` works only with Visual Recognition service instances created before May 23, 2018. Visual Recognition instances created after May 22 use the IAM `apikey`.
-    static let apikey = ""     // The IAM apikey
+    static let apikey = "oSPvI_VA3hWIdCutkfggdtxvXgItQJJm-ff1fOGKMd2F"     // The IAM apikey
     static let api_key = ""    // The apikey
-    static let modelIds = ["YOUR_MODEL_ID"]
+    static let modelIds = ["DefaultCustomModel_936213647"]
     static let version = "2018-03-19"
 }
 
-class ImageClassificationViewController: UIViewController {
-    
+protocol ImageClassificationViewControllerDelegate: class {
+    func didSelectItem(_ name: String)
+}
+
+class ImageClassificationViewController: UIViewController, ImageClassificationViewControllerDelegate {
+
     // MARK: - IBOutlets
     
     @IBOutlet weak var cameraView: UIView!
@@ -99,6 +103,12 @@ class ImageClassificationViewController: UIViewController {
         if modelsToUpdate.count > 0 {
             updateLocalModels(ids: modelsToUpdate)
         }
+        
+        guard let drawer = pulleyViewController?.drawerContentViewController as? ResultsTableViewController else {
+            return
+        }
+        print("delegate set")
+        drawer.delegate = self
     }
     
     // MARK: - Model Methods
@@ -139,17 +149,13 @@ class ImageClassificationViewController: UIViewController {
     // MARK: - Image Classification
     
     func classifyImage(_ image: UIImage, localThreshold: Double = 0.0) {
-        let sliderValue = Double(self.alphaSlider.value)
-        
         var editedImage = cropToCenter(image: image)
         editedImage = resizeImage(image: editedImage, targetSize: CGSize(width: 224, height: 224))
+        self.editedImage = editedImage
         
-        DispatchQueue.main.async {
-            self.showResultsUI(for: editedImage)
-            SwiftSpinner.show("analyzing")
-        }
+        imageView.contentMode = .scaleAspectFit
+        showResultsUI(for: editedImage)
         
-        var originalConf = 0.0
         visualRecognition.classifyWithLocalModel(image: editedImage, classifierIDs: VisualRecognitionConstants.modelIds, threshold: localThreshold, failure: nil) { classifiedImages in
 
             // Make sure that an image was successfully classified.
@@ -157,26 +163,42 @@ class ImageClassificationViewController: UIViewController {
                 let classifier = classifiedImage.classifiers.first else {
                     return
             }
-
-            let usbClass = classifier.classes.filter({ return $0.className.uppercased() == "USB" })
-
-            guard let usbClassSingle = usbClass.first,
-                let score = usbClassSingle.score else {
-                    return
+            
+            DispatchQueue.main.async {
+                self.push(results: [classifier])
             }
-
-            originalConf = score
+        
+            self.originalConfs = classifier.classes
+        }
+    }
+    
+    func didSelectItem(_ name: String) {
+        print("selected success!")
+        startAnalysis(classToAnalyze: name)
+    }
+    
+    func startAnalysis(classToAnalyze: String, localThreshold: Double = 0.0) {
+        let sliderValue = Double(self.alphaSlider.value)
+ 
+        DispatchQueue.main.async {
+            SwiftSpinner.show("analyzing")
         }
         
+        let usbClasses = originalConfs.filter({ return $0.className == classToAnalyze })
         
-        imageView.contentMode = .scaleAspectFit
+        guard let usbClassSingle = usbClasses.first,
+            let score = usbClassSingle.score else {
+                return
+        }
         
+        self.originalConf = score
+
         let dispatchGroup = DispatchGroup()
         
         var confidences = [[Double]](repeating: [Double](repeating: -1, count: 17), count: 17)
         
         dispatchGroup.enter()
-    
+        
         DispatchQueue.global(qos: .background).async {
             
             for down in 0 ..< 11 {
@@ -184,7 +206,7 @@ class ImageClassificationViewController: UIViewController {
                     confidences[down + 3][right + 3] = 0
                     print("\(down) - \(right)")
                     dispatchGroup.enter()
-                    let maskedImage = self.drawRectangleOnImage(image: editedImage, right: right, down: down)
+                    let maskedImage = self.drawRectangleOnImage(image: self.editedImage, right: right, down: down)
                     self.visualRecognition.classifyWithLocalModel(image: maskedImage, classifierIDs: VisualRecognitionConstants.modelIds, threshold: localThreshold, failure: nil) { [down, right] classifiedImages in
                         
                         // Make sure that an image was successfully classified.
@@ -194,7 +216,7 @@ class ImageClassificationViewController: UIViewController {
                                 return
                         }
                         
-                        let usbClass = classifier.classes.filter({ return $0.className.uppercased() == "USB" })
+                        let usbClass = classifier.classes.filter({ return $0.className.uppercased() == classToAnalyze })
                         
                         guard let usbClassSingle = usbClass.first,
                             let score = usbClassSingle.score else {
@@ -209,27 +231,26 @@ class ImageClassificationViewController: UIViewController {
                 }
             }
             dispatchGroup.leave()
-        
+            
             dispatchGroup.notify(queue: .main) {
                 print(confidences)
-                print(originalConf)
+                print(self.originalConf)
                 
-                self.editedImage = editedImage
                 self.confidences = confidences
-                self.originalConf = originalConf
                 
-                let final = self.renderImage(image: editedImage, confidences: confidences, originalConf: originalConf, alpha: sliderValue)
+                let final = self.renderImage(image: self.editedImage, confidences: confidences, originalConf: self.originalConf, alpha: sliderValue)
                 
                 self.imageView.image = final
-                self.confidenceLabel.text = "Confidence: \(originalConf)"
+                
+                self.confidenceLabel.text = "Confidence: \(String(format: "%.3f", self.originalConf))"
                 SwiftSpinner.hide()
             }
         }
-        
     }
     
     var editedImage = UIImage()
     var confidences = [[Double]]()
+    var originalConfs = [ClassResult]()
     var originalConf = 0.0
     
     func renderImage(image: UIImage, confidences: [[Double]], originalConf: Double, alpha: Double) -> UIImage {
@@ -238,31 +259,81 @@ class ImageClassificationViewController: UIViewController {
         
         image.draw(at: .zero, blendMode: .normal, alpha: 1)
         
-        var minVal = 1.0
+        
+        var largestDrop = 1.0
         for row in confidences  {
             for score in row {
-                if score != -1 && score < minVal {
-                    minVal = score
+                if score != -1 && score < largestDrop {
+                    largestDrop = score
                 }
             }
         }
+
+        var minVal = 1.0
         
-        dropLabel.text = "Drop: \(max(originalConf - minVal, 0))"
+        var finals = [[Double]](repeating: [Double](repeating: -1, count: 14), count: 14)
+        
+        // loop through each confidence
+        for down in 0 ..< 14 {
+            for right in 0 ..< 14 {
+                // A 4x4 slice of the confidences
+                let kernel = confidences[down + 0...down + 3].map({ $0[right + 0...right + 3] })
                 
+                // 4x4 = 16 confidences
+                // loop through each confidence in the slice and get the average
+                // ignore -1
+                var sum = 0.0
+                let weights = [
+                    [0.1, 0.5, 0.5, 0.1],
+                    [0.5, 1.0, 1.0, 0.5],
+                    [0.5, 1.0, 1.0, 0.5],
+                    [0.1, 0.5, 0.5, 0.1],
+                ]
+                var count = weights.joined().reduce(0, +)
+                for (down, row) in kernel.enumerated() {
+                    for (right, score) in row.enumerated() {
+                        if score == -1 {
+                            count -= weights[down][right]
+                        } else {
+                            sum += score * weights[down][right]
+                        }
+                    }
+                }
+                
+                let mean = sum / count
+                print("AVG = \(mean)")
+                
+                minVal = min(mean, minVal)
+            }
+        }
+        
+        dropLabel.text = "Drop: \(String(format: "%.3f", max(originalConf - minVal, 0))), \(String(format: "%.3f", max(originalConf - largestDrop, 0)))"
+            
+        // overkill, but do it all again and divide by the minVal
         for down in 0 ..< 14 {
             for right in 0 ..< 14 {
                 let rectangle = CGRect(x: right * 16, y: down * 16, width: 16, height: 16)
                 
+                // A 4x4 slice of the confidences
                 let kernel = confidences[down + 0...down + 3].map({ $0[right + 0...right + 3] })
-            
+                
+                // 4x4 = 16 confidences
+                // loop through each confidence in the slice and get the average
+                // ignore -1
                 var sum = 0.0
-                var count = 16.0
-                for row in kernel {
-                    for score in row {
+                let weights = [
+                    [0.1, 0.5, 0.5, 0.1],
+                    [0.5, 1.0, 1.0, 0.5],
+                    [0.5, 1.0, 1.0, 0.5],
+                    [0.1, 0.5, 0.5, 0.1],
+                    ]
+                var count = weights.joined().reduce(0, +)
+                for (down, row) in kernel.enumerated() {
+                    for (right, score) in row.enumerated() {
                         if score == -1 {
-                            count -= 1
+                            count -= weights[down][right]
                         } else {
-                            sum += score
+                            sum += score * weights[down][right]
                         }
                     }
                 }
@@ -273,9 +344,91 @@ class ImageClassificationViewController: UIViewController {
                 let cappedAlpha = min(max(newalpha, 0), 1)
                 print(cappedAlpha)
                 
-                UIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(cappedAlpha * alpha)).setFill()
+                finals[down][right] = cappedAlpha
+                
+                var grad = UIColor()
+                
+                let gradVal = {(a: Int, b: Int, percent: Double) -> CGFloat in
+                    let dif = b - a
+                    let val = Double(a) + (percent * Double(dif))
+                    return CGFloat(val)
+                }
+                
+//                if originalConf > 0.833 {
+//                    grad = UIColor(red: 100/255, green: 221/255, blue: 23/255, alpha: CGFloat(cappedAlpha * alpha))
+//                } else if originalConf > 0.5 {
+//                    let scaledConf = (originalConf - 0.5) / 0.333
+//                    grad = UIColor(
+//                        red: gradVal(255, 100, scaledConf) / 255,
+//                        green:  gradVal(171, 221, scaledConf) / 255,
+//                        blue:  gradVal(0, 23, scaledConf) / 255, alpha: CGFloat(cappedAlpha * alpha)
+//                    )
+//                } else if originalConf > 0.166 {
+//                    let scaledConf = (originalConf - 0.166) / 0.334
+//                    grad = UIColor(
+//                        red: gradVal(244, 255, scaledConf) / 255,
+//                        green:  gradVal(67, 171, scaledConf) / 255,
+//                        blue:  gradVal(54, 0, scaledConf) / 255, alpha: CGFloat(cappedAlpha * alpha)
+//                    )
+//                } else {
+//                    grad = UIColor(red: 244/255, green: 67/255, blue: 54/255, alpha: CGFloat(cappedAlpha * alpha))
+//                }
+                
+                let green = UIColor(red: 100/255, green: 221/255, blue: 23/255, alpha: CGFloat(cappedAlpha * alpha))
+                let yellow = UIColor(red: 255/255, green: 171/255, blue: 0/255, alpha: CGFloat(cappedAlpha * alpha))
+                let red = UIColor(red: 244/255, green: 67/255, blue: 54/255, alpha: CGFloat(cappedAlpha * alpha))
+                
+                if originalConf <= 0.66666 {
+                    red.setFill()
+                } else if originalConf <= 0.83333 {
+                    yellow.setFill()
+                } else {
+                    green.setFill()
+                }
+                
+//                UIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(cappedAlpha * alpha)).setFill()
+//                grad.setFill()
+                
                 UIRectFillUsingBlendMode(rectangle, .normal)
                 
+            }
+        }
+        
+        
+        for (down, row) in finals.enumerated() {
+            for (right, cappedAlpha) in row.enumerated() {
+                if cappedAlpha < 0.5 {
+                    let path = UIBezierPath()
+                    
+                    path.move(to: CGPoint(x: right * 16, y: down * 16 + 16))
+                    
+                    // check the block to the left
+                    if right > 0 && finals[down][right - 1] >= 0.5 {
+                        path.addLine(to: CGPoint(x: right * 16, y: down * 16))
+                    } else {
+                        path.move(to: CGPoint(x: right * 16, y: down * 16))
+                    }
+                    // check the block above
+                    if down > 0 && finals[down - 1][right] >= 0.5 {
+                        path.addLine(to: CGPoint(x: right * 16 + 16, y: down * 16))
+                    } else {
+                        path.move(to: CGPoint(x: right * 16 + 16, y: down * 16))
+                    }
+                    // check the block to the right
+                    if right < finals[down].count - 1 && finals[down][right + 1] >= 0.5 {
+                        path.addLine(to: CGPoint(x: right * 16 + 16, y: down * 16 + 16))
+                    } else {
+                        path.move(to: CGPoint(x: right * 16 + 16, y: down * 16 + 16))
+                    }
+                    // check the block below
+                    if down < finals.count - 1 && finals[down + 1][right] >= 0.5 {
+                        path.addLine(to: CGPoint(x: right * 16, y: down * 16 + 16))
+                    } else {
+                        path.move(to: CGPoint(x: right * 16, y: down * 16 + 16))
+                    }
+                    UIColor(red: 0, green: 0, blue: 0, alpha: 1).setStroke()
+                    path.stroke()
+                }
             }
         }
         
@@ -378,8 +531,8 @@ class ImageClassificationViewController: UIViewController {
         choosePhotoButton.isHidden = true
         updateModelButton.isHidden = true
         alphaSlider.isHidden = false
-        confidenceLabel.isHidden = false
-        dropLabel.isHidden = false
+//        confidenceLabel.isHidden = false
+//        dropLabel.isHidden = false
     }
     
     func resetUI() {
