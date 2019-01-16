@@ -150,11 +150,10 @@ extension ResultsTableViewController: UITableViewDelegate {
     func tableView(_ tableView: UITableView, willSelectRowAt indexPath: IndexPath) -> IndexPath? {
         if let cell = tableView.cellForRow(at: indexPath) {
             if cell.isSelected {
-                print("cell already selected")
                 return indexPath
             }
         }
-        print("select")
+        
         delegate?.didSelectItem(classifications[indexPath.section].classes[indexPath.item].className)
         return indexPath
     }

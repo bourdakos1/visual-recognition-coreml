@@ -36,14 +36,15 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
     
     @IBOutlet weak var cameraView: UIView!
     @IBOutlet weak var imageView: UIImageView!
+    @IBOutlet weak var heatmapView: UIImageView!
+    @IBOutlet weak var outlineView: UIImageView!
+    @IBOutlet weak var focusView: UIImageView!
     @IBOutlet weak var simulatorTextView: UITextView!
     @IBOutlet weak var captureButton: UIButton!
     @IBOutlet weak var updateModelButton: UIButton!
     @IBOutlet weak var choosePhotoButton: UIButton!
     @IBOutlet weak var closeButton: UIButton!
     @IBOutlet weak var alphaSlider: UISlider!
-    @IBOutlet weak var confidenceLabel: UILabel!
-    @IBOutlet weak var dropLabel: UILabel!
     
     // MARK: - Variable Declarations
     
@@ -68,9 +69,9 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
         if captureSession.canAddOutput(photoOutput) {
             captureSession.addOutput(photoOutput)
             let previewLayer = AVCaptureVideoPreviewLayer(session: captureSession)
-            previewLayer.frame = CGRect(x: view.bounds.minX, y: view.bounds.minY, width: view.bounds.width, height: view.bounds.width)
+            previewLayer.frame = CGRect(x: view.bounds.minX, y: view.bounds.minY, width: view.bounds.width, height: view.bounds.height)
             // `.resize` allows the camera to fill the screen on the iPhone X.
-            previewLayer.videoGravity = .resizeAspectFill
+            previewLayer.videoGravity = .resize
             previewLayer.connection?.videoOrientation = .portrait
             cameraView.layer.addSublayer(previewLayer)
             return captureSession
@@ -107,7 +108,7 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
         guard let drawer = pulleyViewController?.drawerContentViewController as? ResultsTableViewController else {
             return
         }
-        print("delegate set")
+        
         drawer.delegate = self
     }
     
@@ -149,12 +150,11 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
     // MARK: - Image Classification
     
     func classifyImage(_ image: UIImage, localThreshold: Double = 0.0) {
-        var editedImage = cropToCenter(image: image)
-        editedImage = resizeImage(image: editedImage, targetSize: CGSize(width: 224, height: 224))
-        self.editedImage = editedImage
+        rawImage = image
         
-        imageView.contentMode = .scaleAspectFit
-        showResultsUI(for: editedImage)
+        editedImage = cropToCenter(image: image, targetSize: CGSize(width: 224, height: 224))
+        
+        showResultsUI(for: image)
         
         visualRecognition.classifyWithLocalModel(image: editedImage, classifierIDs: VisualRecognitionConstants.modelIds, threshold: localThreshold, failure: nil) { classifiedImages in
 
@@ -173,46 +173,42 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
     }
     
     func didSelectItem(_ name: String) {
-        print("selected success!")
         startAnalysis(classToAnalyze: name)
     }
     
+    var rawImage = UIImage()
+    var editedImage = UIImage()
+    var originalConfs = [ClassResult]()
+    
     func startAnalysis(classToAnalyze: String, localThreshold: Double = 0.0) {
-        let sliderValue = Double(self.alphaSlider.value)
+        var confidences = [[Double]](repeating: [Double](repeating: -1, count: 17), count: 17)
  
         DispatchQueue.main.async {
             SwiftSpinner.show("analyzing")
         }
         
         let usbClasses = originalConfs.filter({ return $0.className == classToAnalyze })
-        
-        guard let usbClassSingle = usbClasses.first,
-            let score = usbClassSingle.score else {
+        guard let usbClass = usbClasses.first,
+            let originalConf = usbClass.score else {
                 return
         }
-        
-        self.originalConf = score
 
         let dispatchGroup = DispatchGroup()
-        
-        var confidences = [[Double]](repeating: [Double](repeating: -1, count: 17), count: 17)
-        
         dispatchGroup.enter()
         
         DispatchQueue.global(qos: .background).async {
-            
             for down in 0 ..< 11 {
                 for right in 0 ..< 11 {
                     confidences[down + 3][right + 3] = 0
-                    print("\(down) - \(right)")
                     dispatchGroup.enter()
-                    let maskedImage = self.drawRectangleOnImage(image: self.editedImage, right: right, down: down)
+                    let maskedImage = self.maskImage(image: self.editedImage, at: CGPoint(x: right, y: down))
                     self.visualRecognition.classifyWithLocalModel(image: maskedImage, classifierIDs: VisualRecognitionConstants.modelIds, threshold: localThreshold, failure: nil) { [down, right] classifiedImages in
+                        
+                        defer { dispatchGroup.leave() }
                         
                         // Make sure that an image was successfully classified.
                         guard let classifiedImage = classifiedImages.images.first,
                             let classifier = classifiedImage.classifiers.first else {
-                                dispatchGroup.leave()
                                 return
                         }
                         
@@ -220,58 +216,42 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
                         
                         guard let usbClassSingle = usbClass.first,
                             let score = usbClassSingle.score else {
-                                dispatchGroup.leave()
                                 return
                         }
                         
-                        print("\(down) - \(right)")
+                        print(".", terminator:"")
+                        
                         confidences[down + 3][right + 3] = score
-                        dispatchGroup.leave()
                     }
                 }
             }
             dispatchGroup.leave()
             
             dispatchGroup.notify(queue: .main) {
+                print()
                 print(confidences)
-                print(self.originalConf)
                 
-                self.confidences = confidences
+                let heatmap = self.calculateHeatmap(confidences, originalConf)
+                let heatmapImage = self.renderHeatmap(heatmap, color: .black, size: self.rawImage.size)
+                let outlineImage = self.renderOutline(heatmap, size: self.rawImage.size)
                 
-                let final = self.renderImage(image: self.editedImage, confidences: confidences, originalConf: self.originalConf, alpha: sliderValue)
+                self.heatmapView.image = heatmapImage
+                self.outlineView.image = outlineImage
+                self.heatmapView.alpha = CGFloat(self.alphaSlider.value)
                 
-                self.imageView.image = final
+                self.heatmapView.isHidden = false
+                self.outlineView.isHidden = false
+                self.alphaSlider.isHidden = false
                 
-                self.confidenceLabel.text = "Confidence: \(String(format: "%.3f", self.originalConf))"
                 SwiftSpinner.hide()
             }
         }
     }
     
-    var editedImage = UIImage()
-    var confidences = [[Double]]()
-    var originalConfs = [ClassResult]()
-    var originalConf = 0.0
-    
-    func renderImage(image: UIImage, confidences: [[Double]], originalConf: Double, alpha: Double) -> UIImage {
-        let size = image.size
-        UIGraphicsBeginImageContextWithOptions(size, true, UIScreen.main.scale)
+    func calculateHeatmap(_ confidences: [[Double]], _ originalConf: Double) -> [[CGFloat]] {
+        var minVal: CGFloat = 1.0
         
-        image.draw(at: .zero, blendMode: .normal, alpha: 1)
-        
-        
-        var largestDrop = 1.0
-        for row in confidences  {
-            for score in row {
-                if score != -1 && score < largestDrop {
-                    largestDrop = score
-                }
-            }
-        }
-
-        var minVal = 1.0
-        
-        var finals = [[Double]](repeating: [Double](repeating: -1, count: 14), count: 14)
+        var heatmap = [[CGFloat]](repeating: [CGFloat](repeating: -1, count: 14), count: 14)
         
         // loop through each confidence
         for down in 0 ..< 14 {
@@ -279,48 +259,8 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
                 // A 4x4 slice of the confidences
                 let kernel = confidences[down + 0...down + 3].map({ $0[right + 0...right + 3] })
                 
-                // 4x4 = 16 confidences
-                // loop through each confidence in the slice and get the average
-                // ignore -1
-                var sum = 0.0
-                let weights = [
-                    [0.1, 0.5, 0.5, 0.1],
-                    [0.5, 1.0, 1.0, 0.5],
-                    [0.5, 1.0, 1.0, 0.5],
-                    [0.1, 0.5, 0.5, 0.1],
-                ]
-                var count = weights.joined().reduce(0, +)
-                for (down, row) in kernel.enumerated() {
-                    for (right, score) in row.enumerated() {
-                        if score == -1 {
-                            count -= weights[down][right]
-                        } else {
-                            sum += score * weights[down][right]
-                        }
-                    }
-                }
-                
-                let mean = sum / count
-                print("AVG = \(mean)")
-                
-                minVal = min(mean, minVal)
-            }
-        }
-        
-        dropLabel.text = "Drop: \(String(format: "%.3f", max(originalConf - minVal, 0))), \(String(format: "%.3f", max(originalConf - largestDrop, 0)))"
-            
-        // overkill, but do it all again and divide by the minVal
-        for down in 0 ..< 14 {
-            for right in 0 ..< 14 {
-                let rectangle = CGRect(x: right * 16, y: down * 16, width: 16, height: 16)
-                
-                // A 4x4 slice of the confidences
-                let kernel = confidences[down + 0...down + 3].map({ $0[right + 0...right + 3] })
-                
-                // 4x4 = 16 confidences
-                // loop through each confidence in the slice and get the average
-                // ignore -1
-                var sum = 0.0
+                // loop through each confidence in the slice and get the average, ignoring -1
+                var result = 0.0
                 let weights = [
                     [0.1, 0.5, 0.5, 0.1],
                     [0.5, 1.0, 1.0, 0.5],
@@ -333,117 +273,125 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
                         if score == -1 {
                             count -= weights[down][right]
                         } else {
-                            sum += score * weights[down][right]
+                            result += score * weights[down][right]
                         }
                     }
                 }
                 
-                let mean = sum / count
+                let mean = CGFloat(result / count)
                 
-                let newalpha = 1 - max(originalConf - mean, 0) / max(originalConf - minVal, 0)
+                heatmap[down][right] = mean
+                
+                minVal = min(mean, minVal)
+            }
+        }
+        
+        for (down, row) in heatmap.enumerated() {
+            for (right, mean) in row.enumerated() {
+                let newalpha = 1 - max(CGFloat(originalConf) - mean, 0) / max(CGFloat(originalConf) - minVal, 0)
                 let cappedAlpha = min(max(newalpha, 0), 1)
-                print(cappedAlpha)
-                
-                finals[down][right] = cappedAlpha
-                
-                var grad = UIColor()
-                
-                let gradVal = {(a: Int, b: Int, percent: Double) -> CGFloat in
-                    let dif = b - a
-                    let val = Double(a) + (percent * Double(dif))
-                    return CGFloat(val)
-                }
-                
-//                if originalConf > 0.833 {
-//                    grad = UIColor(red: 100/255, green: 221/255, blue: 23/255, alpha: CGFloat(cappedAlpha * alpha))
-//                } else if originalConf > 0.5 {
-//                    let scaledConf = (originalConf - 0.5) / 0.333
-//                    grad = UIColor(
-//                        red: gradVal(255, 100, scaledConf) / 255,
-//                        green:  gradVal(171, 221, scaledConf) / 255,
-//                        blue:  gradVal(0, 23, scaledConf) / 255, alpha: CGFloat(cappedAlpha * alpha)
-//                    )
-//                } else if originalConf > 0.166 {
-//                    let scaledConf = (originalConf - 0.166) / 0.334
-//                    grad = UIColor(
-//                        red: gradVal(244, 255, scaledConf) / 255,
-//                        green:  gradVal(67, 171, scaledConf) / 255,
-//                        blue:  gradVal(54, 0, scaledConf) / 255, alpha: CGFloat(cappedAlpha * alpha)
-//                    )
-//                } else {
-//                    grad = UIColor(red: 244/255, green: 67/255, blue: 54/255, alpha: CGFloat(cappedAlpha * alpha))
-//                }
-                
-                let green = UIColor(red: 100/255, green: 221/255, blue: 23/255, alpha: CGFloat(cappedAlpha * alpha))
-                let yellow = UIColor(red: 255/255, green: 171/255, blue: 0/255, alpha: CGFloat(cappedAlpha * alpha))
-                let red = UIColor(red: 244/255, green: 67/255, blue: 54/255, alpha: CGFloat(cappedAlpha * alpha))
-                
-                if originalConf <= 0.66666 {
-                    red.setFill()
-                } else if originalConf <= 0.83333 {
-                    yellow.setFill()
-                } else {
-                    green.setFill()
-                }
-                
-//                UIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(cappedAlpha * alpha)).setFill()
-//                grad.setFill()
-                
+                heatmap[down][right] = cappedAlpha
+            }
+        }
+        
+        return heatmap
+    }
+    
+    func renderHeatmap(_ heatmap: [[CGFloat]], color: UIColor, size: CGSize) -> UIImage {
+        UIGraphicsBeginImageContextWithOptions(size, false, UIScreen.main.scale)
+        
+        let scale = size.width / 14
+        let offset = (size.height - size.width) / 2
+        
+        for (down, row) in heatmap.enumerated() {
+            for (right, mean) in row.enumerated() {
+                let rectangle = CGRect(x: CGFloat(right) * scale, y: CGFloat(down) * scale + offset, width: scale, height: scale)
+                color.withAlphaComponent(mean).setFill()
                 UIRectFillUsingBlendMode(rectangle, .normal)
-                
             }
         }
         
-        
-        for (down, row) in finals.enumerated() {
-            for (right, cappedAlpha) in row.enumerated() {
-                if cappedAlpha < 0.5 {
-                    let path = UIBezierPath()
-                    
-                    path.move(to: CGPoint(x: right * 16, y: down * 16 + 16))
-                    
-                    // check the block to the left
-                    if right > 0 && finals[down][right - 1] >= 0.5 {
-                        path.addLine(to: CGPoint(x: right * 16, y: down * 16))
-                    } else {
-                        path.move(to: CGPoint(x: right * 16, y: down * 16))
-                    }
-                    // check the block above
-                    if down > 0 && finals[down - 1][right] >= 0.5 {
-                        path.addLine(to: CGPoint(x: right * 16 + 16, y: down * 16))
-                    } else {
-                        path.move(to: CGPoint(x: right * 16 + 16, y: down * 16))
-                    }
-                    // check the block to the right
-                    if right < finals[down].count - 1 && finals[down][right + 1] >= 0.5 {
-                        path.addLine(to: CGPoint(x: right * 16 + 16, y: down * 16 + 16))
-                    } else {
-                        path.move(to: CGPoint(x: right * 16 + 16, y: down * 16 + 16))
-                    }
-                    // check the block below
-                    if down < finals.count - 1 && finals[down + 1][right] >= 0.5 {
-                        path.addLine(to: CGPoint(x: right * 16, y: down * 16 + 16))
-                    } else {
-                        path.move(to: CGPoint(x: right * 16, y: down * 16 + 16))
-                    }
-                    UIColor(red: 0, green: 0, blue: 0, alpha: 1).setStroke()
-                    path.stroke()
-                }
-            }
-        }
+        color.setFill()
+
+        let topMargin = CGRect(x: 0, y: 0, width: size.width, height: offset)
+        let bottomMargin = CGRect(x: 0, y: size.width + offset, width: size.width, height: offset)
+        UIRectFillUsingBlendMode(topMargin, .normal)
+        UIRectFillUsingBlendMode(bottomMargin, .normal)
         
         let newImage = UIGraphicsGetImageFromCurrentImageContext()!
         UIGraphicsEndImageContext()
         return newImage
     }
     
-    func drawRectangleOnImage(image: UIImage, right: Int, down: Int) -> UIImage {
+    func renderOutline(_ heatmap: [[CGFloat]], size: CGSize) -> UIImage  {
+        UIGraphicsBeginImageContextWithOptions(size, false, UIScreen.main.scale)
+
+        let path = UIBezierPath()
+        
+        let scale = size.width / 14
+        let offset = (size.height - size.width) / 2
+        
+        for (down, row) in heatmap.enumerated() {
+            for (right, cappedAlpha) in row.enumerated() {
+                let scaledDown = CGFloat(down) * scale
+                let scaledRight = CGFloat(right) * scale
+                
+                let topLeft = CGPoint(x: scaledRight, y: scaledDown + offset)
+                let topRight = CGPoint(x: scaledRight + scale, y: scaledDown + offset)
+                let bottomRight = CGPoint(x: scaledRight + scale, y: scaledDown + scale + offset)
+                let bottomLeft = CGPoint(x: scaledRight, y: scaledDown + scale + offset)
+                
+                if cappedAlpha < 0.5 {
+                    path.move(to: bottomLeft)
+                    
+                    // check the block to the left
+                    if right <= 0 || heatmap[down][right - 1] >= 0.5 {
+                        path.addLine(to: topLeft)
+                    } else {
+                        path.move(to: topLeft)
+                    }
+                    // check the block above
+                    if down <= 0 || heatmap[down - 1][right] >= 0.5 {
+                        path.addLine(to: topRight)
+                    } else {
+                        path.move(to: topRight)
+                    }
+                    // check the block to the right
+                    if right >= heatmap[down].count - 1 || heatmap[down][right + 1] >= 0.5 {
+                        path.addLine(to: bottomRight)
+                    } else {
+                        path.move(to: bottomRight)
+                    }
+                    // check the block below
+                    if down >= heatmap.count - 1 || heatmap[down + 1][right] >= 0.5 {
+                        path.addLine(to: bottomLeft)
+                    } else {
+                        path.move(to: bottomLeft)
+                    }
+                }
+            }
+        }
+        
+        path.lineWidth = 8
+        UIColor(red: 0 / 255, green: 0 / 255, blue: 0 / 255, alpha: 0.4).setStroke()
+        path.stroke()
+        
+        path.lineWidth = 6
+        UIColor(red: 255 / 255, green: 255 / 255, blue: 255 / 255, alpha: 1).setStroke()
+        path.stroke()
+        
+        let newImage = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        return newImage
+    }
+    
+    func maskImage(image: UIImage, at point: CGPoint) -> UIImage {
         let size = image.size
-        UIGraphicsBeginImageContextWithOptions(size, true, UIScreen.main.scale)
+        UIGraphicsBeginImageContextWithOptions(size, false, UIScreen.main.scale)
         
         image.draw(at: .zero)
         
-        let rectangle = CGRect(x: right * 16, y: down * 16, width: 64, height: 64)
+        let rectangle = CGRect(x: point.x * 16, y: point.y * 16, width: 64, height: 64)
         
         UIColor(red: 1, green: 0, blue: 1, alpha: 1).setFill()
         UIRectFill(rectangle)
@@ -453,60 +401,30 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
         return newImage
     }
     
-    func resizeImage(image: UIImage, targetSize: CGSize) -> UIImage {
-        let size = image.size
-        
-        let widthRatio  = targetSize.width  / size.width
-        let heightRatio = targetSize.height / size.height
-        
-        // Figure out what our orientation is, and use that to form the rectangle
-        var newSize: CGSize
-        if(widthRatio > heightRatio) {
-            newSize = CGSize(width: size.width * heightRatio, height: size.height * heightRatio)
-        } else {
-            newSize = CGSize(width: size.width * widthRatio,  height: size.height * widthRatio)
-        }
-        
-        // This is the rect that we've calculated out and this is what is actually used below
-        let rect = CGRect(x: 0, y: 0, width: newSize.width, height: newSize.height)
-        
-        // Actually do the resizing to the rect using the ImageContext stuff
-        UIGraphicsBeginImageContextWithOptions(newSize, false, 1.0)
-        image.draw(in: rect)
-        let newImage = UIGraphicsGetImageFromCurrentImageContext()
-        UIGraphicsEndImageContext()
-        
-        return newImage!
-    }
-    
-    func cropToCenter(image: UIImage) -> UIImage {
-        let contextImage: UIImage = UIImage(cgImage: image.cgImage!)
-        
-        let contextSize: CGSize = contextImage.size
-        var posX: CGFloat = 0.0
-        var posY: CGFloat = 0.0
-        var cgwidth: CGFloat = contextSize.width
-        var cgheight: CGFloat = contextSize.height
-        
-        // See what size is longer and create the center off of that
-        if contextSize.width > contextSize.height {
-            posX = ((contextSize.width - contextSize.height) / 2)
-            posY = 0
-            cgwidth = contextSize.height
-            cgheight = contextSize.height
-        } else if contextSize.width < contextSize.height {
-            posX = 0
-            posY = ((contextSize.height - contextSize.width) / 2)
-            cgwidth = contextSize.width
-            cgheight = contextSize.width
-        }
+    func cropToCenter(image: UIImage, targetSize: CGSize) -> UIImage {
+        let offset = abs((image.size.width - image.size.height) / 2)
+        let posX = image.size.width > image.size.height ? offset : 0.0
+        let posY = image.size.width < image.size.height ? offset : 0.0
+        let newSize = CGFloat(min(image.size.width, image.size.height))
         
         // crop image to square
-        let rect: CGRect = CGRect(x: posX, y: posY, width: cgwidth, height: cgheight)
-        let imageRef: CGImage = contextImage.cgImage!.cropping(to: rect)!
-        let image: UIImage = UIImage(cgImage: imageRef, scale: image.scale, orientation: image.imageOrientation)
+        let cropRect = CGRect(x: posX, y: posY, width: newSize, height: newSize)
         
-        return image
+        guard let cgImage = image.cgImage,
+            let cropped = cgImage.cropping(to: cropRect) else {
+                return image
+        }
+        
+        let image = UIImage(cgImage: cropped, scale: image.scale, orientation: image.imageOrientation)
+        
+        let resizeRect = CGRect(x: 0, y: 0, width: targetSize.width, height: targetSize.height)
+        
+        UIGraphicsBeginImageContextWithOptions(targetSize, false, 1.0)
+        image.draw(in: resizeRect)
+        let newImage = UIGraphicsGetImageFromCurrentImageContext()!
+        UIGraphicsEndImageContext()
+        
+        return newImage
     }
     
     func dismissResults() {
@@ -530,9 +448,7 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
         captureButton.isHidden = true
         choosePhotoButton.isHidden = true
         updateModelButton.isHidden = true
-        alphaSlider.isHidden = false
-//        confidenceLabel.isHidden = false
-//        dropLabel.isHidden = false
+        focusView.isHidden = true
     }
     
     func resetUI() {
@@ -540,14 +456,16 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
             simulatorTextView.isHidden = true
             imageView.isHidden = true
             captureButton.isHidden = false
+            focusView.isHidden = false
         } else {
             imageView.image = UIImage(named: "Background")
             simulatorTextView.isHidden = false
             imageView.isHidden = false
             captureButton.isHidden = true
+            focusView.isHidden = true
         }
-        dropLabel.isHidden = true
-        confidenceLabel.isHidden = true
+        heatmapView.isHidden = true
+        outlineView.isHidden = true
         alphaSlider.isHidden = true
         closeButton.isHidden = true
         choosePhotoButton.isHidden = false
@@ -558,9 +476,8 @@ class ImageClassificationViewController: UIViewController, ImageClassificationVi
     // MARK: - IBActions
     
     @IBAction func sliderValueChanged(_ sender: UISlider) {
-        let currentValue = Double(sender.value)
-        let final = self.renderImage(image: editedImage, confidences: confidences, originalConf: originalConf, alpha: currentValue)
-        imageView.image = final
+        let currentValue = CGFloat(sender.value)
+        self.heatmapView.alpha = currentValue
     }
     
     @IBAction func capturePhoto() {
